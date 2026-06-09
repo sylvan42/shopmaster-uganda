@@ -1,0 +1,128 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;420;500;550&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-feature-settings: "ss03";
+    @apply bg-canvas-light text-ink font-body antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary-pill {
+    @apply inline-flex items-center justify-center bg-primary text-on-primary text-body-md rounded-pill px-[24px] py-[12px] transition-colors hover:bg-shade-70 active:bg-shade-70 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center bg-transparent text-ink text-body-md rounded-md px-[8px] py-[8px] transition-colors hover:bg-shade-30;
+  }
+
+  .btn-outline-on-light {
+    @apply inline-flex items-center justify-center bg-canvas-light text-ink border border-ink text-body-md rounded-pill px-[24px] py-[12px] transition-colors;
+  }
+  
+  .btn-outline-on-dark {
+    @apply inline-flex items-center justify-center bg-transparent text-on-primary border-2 border-on-primary text-body-md rounded-pill px-[26px] py-[12px] transition-colors;
+  }
+
+  .btn-aloe-pill {
+    @apply inline-flex items-center justify-center bg-aloe-10 text-ink text-body-md rounded-pill px-[24px] py-[12px] transition-colors;
+  }
+
+  .text-input {
+    @apply w-full bg-canvas-light text-ink text-body-md rounded-md px-[12px] py-[10px] border border-hairline-light focus:outline-none focus:border-ink transition-colors;
+  }
+
+  .card-pricing {
+    @apply bg-canvas-light text-ink text-body-md rounded-lg p-xxl border border-hairline-light;
+  }
+
+  .card-pricing-featured {
+    @apply bg-aloe-10 text-ink text-body-md rounded-lg p-xxl;
+  }
+
+  .card-feature-cinematic {
+    @apply bg-canvas-night-elevated text-on-primary text-body-lg rounded-lg p-xxl shadow-elevation-1;
+  }
+
+  .card-pistachio-band {
+    @apply bg-pistachio-10 text-ink text-body-md rounded-lg p-xxl;
+  }
+  
+  .card-standard {
+    @apply bg-canvas-light text-ink rounded-lg p-xl border border-hairline-light shadow-elevation-3;
+  }
+
+  .pill-tag-mint {
+    @apply inline-flex items-center bg-aloe-10 text-ink text-eyebrow-cap uppercase rounded-pill px-[12px] py-[4px];
+  }
+
+  .pill-tag-shade {
+    @apply inline-flex items-center bg-shade-30 text-ink text-eyebrow-cap uppercase rounded-pill px-[12px] py-[4px];
+  }
+
+  .nav-bar-light {
+    @apply flex items-center justify-between bg-canvas-light text-ink text-body-md rounded-xs px-[24px] py-[16px];
+  }
+
+  .nav-bar-dark {
+    @apply flex items-center justify-between bg-canvas-night text-on-primary text-body-md rounded-xs px-[24px] py-[16px];
+  }
+
+  .footer-light {
+    @apply bg-canvas-light text-ink text-caption rounded-xs px-[24px] py-[64px];
+  }
+
+  .page-header {
+    @apply flex flex-col gap-[12px] sm:flex-row sm:items-center sm:justify-between mb-[32px];
+  }
+
+  .spinner {
+    @apply w-8 h-8 rounded-full border-2 border-hairline-light border-t-ink animate-spin;
+  }
+
+  .search-input {
+    @apply text-input pl-[40px];
+  }
+
+  .table-container {
+    @apply bg-canvas-light text-ink rounded-lg border border-hairline-light shadow-elevation-3 overflow-hidden;
+  }
+
+  .table-base {
+    @apply w-full text-body-md;
+  }
+
+  .th-cell {
+    @apply px-[24px] py-[12px] text-left text-eyebrow-cap uppercase text-shade-50 tracking-widest border-b border-hairline-light bg-canvas-cream whitespace-nowrap;
+  }
+
+  .td-cell {
+    @apply px-[24px] py-[14px] border-b border-hairline-light last:border-0 whitespace-nowrap;
+  }
+
+  .badge-green {
+    @apply inline-flex items-center bg-aloe-10 text-ink text-eyebrow-cap uppercase rounded-pill px-[10px] py-[3px] font-medium;
+  }
+
+  .badge-yellow {
+    @apply inline-flex items-center bg-[#fef9c3] text-[#854d0e] text-eyebrow-cap uppercase rounded-pill px-[10px] py-[3px] font-medium;
+  }
+
+  .badge-red {
+    @apply inline-flex items-center bg-[#fee2e2] text-[#991b1b] text-eyebrow-cap uppercase rounded-pill px-[10px] py-[3px] font-medium;
+  }
+
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-[64px] text-center;
+  }
+}
