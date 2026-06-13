@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Eye, EyeOff, ShoppingBag, Store, Users, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { authService } from '../services/supabase'
 
 export const Signup = () => {
@@ -17,6 +18,7 @@ export const Signup = () => {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signup } = useAuth()
+  const toast = useToast()
   const navigate = useNavigate()
 
   // Live-validate the invite code so the employee sees which shop they're joining
@@ -72,12 +74,16 @@ export const Signup = () => {
       } else {
         setError(error.message)
       }
+      setLoading(false)
     } else if (data && !data.session) {
-      setError('Signup successful! Please check your email to confirm your account before logging in.')
+      // Email confirmation required: send them to login with a transient toast.
+      // The toast lives above the router so it survives the navigation, then
+      // auto-dismisses; a page refresh clears it (it's in-memory only).
+      toast.success('Signup successful! Check your email to confirm your account before logging in.')
+      navigate('/login')
     } else {
       navigate('/dashboard')
     }
-    setLoading(false)
   }
 
   const tabClass = (active) =>
@@ -189,11 +195,7 @@ export const Signup = () => {
             </div>
 
             {error && (
-              <div className={`px-[12px] py-[10px] rounded-md text-caption ${
-                error.includes('successful')
-                  ? 'bg-aloe-10 text-ink'
-                  : 'bg-[#fee2e2] text-[#991b1b]'
-              }`}>
+              <div className="px-[12px] py-[10px] rounded-md text-caption bg-[#fee2e2] text-[#991b1b]">
                 {error}
               </div>
             )}
