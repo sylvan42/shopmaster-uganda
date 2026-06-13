@@ -20,7 +20,7 @@ const PAGE_TITLES = {
 export const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const { user, logout, userRole } = useAuth()
+  const { user, profile, shopName, logout, userRole } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -34,9 +34,9 @@ export const Layout = ({ children }) => {
     navigate('/login')
   }
 
-  const isAdmin = userRole === 'admin'
+  const isOwner = userRole === 'owner'
 
-  const adminMenuItems = [
+  const ownerMenuItems = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { label: 'Products', icon: Package, path: '/products' },
     { label: 'Sales', icon: ShoppingCart, path: '/sales' },
@@ -49,15 +49,21 @@ export const Layout = ({ children }) => {
 
   const employeeMenuItems = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-    { label: 'Record Sales', icon: ShoppingCart, path: '/sales' },
-    { label: 'Daily Report', icon: BarChart3, path: '/daily-report' },
+    { label: 'Products', icon: Package, path: '/products' },
+    { label: 'Sales', icon: ShoppingCart, path: '/sales' },
+    { label: 'Inventory', icon: Warehouse, path: '/inventory' },
+    { label: 'Settings', icon: Settings, path: '/settings' },
   ]
 
-  const menuItems = isAdmin ? adminMenuItems : employeeMenuItems
+  const menuItems = isOwner ? ownerMenuItems : employeeMenuItems
 
-  const initials = user?.email
-    ? user.email.slice(0, 2).toUpperCase()
-    : 'U'
+  const displayName = profile?.full_name || user?.email || ''
+  const initials = (profile?.full_name || user?.email || 'U')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
 
   const pageTitle = PAGE_TITLES[location.pathname] || 'ShopMaster'
 
@@ -66,8 +72,8 @@ export const Layout = ({ children }) => {
       {/* Brand */}
       <div className="px-[24px] py-[20px] flex items-center justify-between border-b border-hairline-dark">
         {expanded && (
-          <span className="text-heading-md font-display font-medium tracking-tight text-on-primary">
-            ShopMaster
+          <span className="text-heading-md font-display font-medium tracking-tight text-on-primary truncate">
+            {shopName || 'ShopMaster'}
           </span>
         )}
         {!expanded && (
@@ -171,9 +177,9 @@ export const Layout = ({ children }) => {
             <h2 className="text-heading-md font-medium text-ink">{pageTitle}</h2>
           </div>
           <div className="flex items-center gap-[12px]">
-            <span className="hidden sm:block text-body-md text-shade-60">{user?.email}</span>
+            <span className="hidden sm:block text-body-md text-shade-60">{displayName}</span>
             <span className="pill-tag-mint text-xs">
-              {userRole === 'admin' ? 'Owner' : 'Employee'}
+              {isOwner ? 'Owner' : 'Employee'}
             </span>
             <div className="w-8 h-8 rounded-full bg-shade-30 flex items-center justify-center text-eyebrow-cap font-medium text-ink select-none">
               {initials}

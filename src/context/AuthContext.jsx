@@ -1,39 +1,67 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { authService } from '../services/supabase'
 
 const AuthContext = createContext()
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [userRole, setUserRole] = useState(null)
+
+  const loadProfile = useCallback(async (sessionUser) => {
+    if (!sessionUser) {
+      setProfile(null)
+      return
+    }
+    const { data } = await authService.getProfile()
+    if (data && !data.is_active) {
+      // Deactivated accounts are signed out immediately
+      await authService.logout()
+      setUser(null)
+      setProfile(null)
+      return
+    }
+    setProfile(data || null)
+  }, [])
 
   useEffect(() => {
-    const getUser = async () => {
+    let cancelled = false
+
+    const init = async () => {
       const { user } = await authService.getCurrentUser()
+      if (cancelled) return
       setUser(user)
-      if (user?.user_metadata?.role) {
-        setUserRole(user.user_metadata.role)
-      }
-      setLoading(false)
+      await loadProfile(user)
+      if (!cancelled) setLoading(false)
     }
 
-    getUser()
+    init()
 
     const { data } = authService.onAuthStateChange((event, session) => {
-      setUser(session?.user || null)
-      if (session?.user?.user_metadata?.role) {
-        setUserRole(session.user.user_metadata.role)
+      const sessionUser = session?.user || null
+      setUser(sessionUser)
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+        loadProfile(sessionUser)
       }
     })
 
-    return () => data?.subscription?.unsubscribe?.()
-  }, [])
+    return () => {
+      cancelled = true
+      data?.subscription?.unsubscribe?.()
+    }
+  }, [loadProfile])
+
+  const refreshProfile = useCallback(() => loadProfile(user), [loadProfile, user])
 
   const value = {
     user,
+    profile,
     loading,
-    userRole,
+    userRole: profile?.role || null,
+    shopId: profile?.shop_id || null,
+    shopName: profile?.shops?.name || '',
+    inviteCode: profile?.shops?.invite_code || '',
+    refreshProfile,
     login: authService.login,
     logout: authService.logout,
     signup: authService.signup,

@@ -3,9 +3,10 @@ import { useAuth } from '../context/AuthContext'
 import { LoadingScreen } from './LoadingScreen'
 
 export const ProtectedRoute = ({ children, requiredRole = null }) => {
-  const { user, loading, userRole } = useAuth()
+  const { user, profile, loading, userRole } = useAuth()
 
-  if (loading) return <LoadingScreen />
+  // Profile loads asynchronously after the session resolves
+  if (loading || (user && !profile)) return <LoadingScreen />
 
   if (!user) return <Navigate to="/login" replace />
 

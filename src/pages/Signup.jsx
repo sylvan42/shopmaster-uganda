@@ -1,19 +1,41 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Eye, EyeOff, ShoppingBag, ChevronDown } from 'lucide-react'
+import { Eye, EyeOff, ShoppingBag, Store, Users, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { authService } from '../services/supabase'
 
 export const Signup = () => {
+  const [mode, setMode] = useState('owner') // 'owner' | 'employee'
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [role, setRole] = useState('employee')
   const [shopName, setShopName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [inviteShopName, setInviteShopName] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signup } = useAuth()
   const navigate = useNavigate()
+
+  // Live-validate the invite code so the employee sees which shop they're joining
+  useEffect(() => {
+    const code = inviteCode.trim()
+    if (mode !== 'employee' || code.length < 9) {
+      setInviteShopName(null)
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      const { data } = await authService.validateInviteCode(code)
+      if (!cancelled) setInviteShopName(data || null)
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [inviteCode, mode])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -27,16 +49,29 @@ export const Signup = () => {
       setError('Password must be at least 6 characters')
       return
     }
+    if (mode === 'owner' && !shopName.trim()) {
+      setError('Please enter your shop name')
+      return
+    }
+    if (mode === 'employee' && !inviteCode.trim()) {
+      setError('Please enter the invite code from your shop owner')
+      return
+    }
 
     setLoading(true)
-    const { data, error } = await signup(email, password, {
-      role,
-      shopName,
-      displayName: shopName || email.split('@')[0],
-    })
+    const userData =
+      mode === 'owner'
+        ? { role: 'owner', full_name: fullName.trim(), shop_name: shopName.trim() }
+        : { role: 'employee', full_name: fullName.trim(), invite_code: inviteCode.trim().toUpperCase() }
+
+    const { data, error } = await signup(email, password, userData)
 
     if (error) {
-      setError(error.message)
+      if (error.message?.toLowerCase().includes('invalid invite code')) {
+        setError('That invite code is not valid. Ask your shop owner for the current code.')
+      } else {
+        setError(error.message)
+      }
     } else if (data && !data.session) {
       setError('Signup successful! Please check your email to confirm your account before logging in.')
     } else {
@@ -44,6 +79,11 @@ export const Signup = () => {
     }
     setLoading(false)
   }
+
+  const tabClass = (active) =>
+    `flex-1 flex items-center justify-center gap-[8px] px-[16px] py-[10px] rounded-lg text-body-md font-medium transition-colors ${
+      active ? 'bg-ink text-on-primary' : 'bg-canvas-cream text-shade-60 hover:text-ink'
+    }`
 
   return (
     <div className="min-h-screen flex font-body antialiased">
@@ -59,7 +99,7 @@ export const Signup = () => {
             Start managing<br />your shop today.
           </h1>
           <ul className="space-y-[12px]">
-            {['Role-based access for your team', 'Inventory and sales in one place', 'Mobile Money payment tracking'].map((f) => (
+            {['Owners create a shop and share an invite code', 'Employees join with the code and record sales', 'Inventory, sales and profit in one place'].map((f) => (
               <li key={f} className="flex items-center gap-[10px] text-body-md text-shade-40">
                 <span className="w-1.5 h-1.5 rounded-full bg-aloe-10 shrink-0" />
                 {f}
@@ -79,32 +119,54 @@ export const Signup = () => {
           </div>
 
           <h2 className="text-heading-xl font-medium text-ink mb-[8px]">Create an account</h2>
-          <p className="text-body-md text-shade-60 mb-[32px]">Set up your shop management system.</p>
+          <p className="text-body-md text-shade-60 mb-[24px]">Set up a new shop or join an existing one.</p>
+
+          {/* Mode tabs */}
+          <div className="flex gap-[8px] p-[4px] bg-canvas-cream border border-hairline-light rounded-xl mb-[24px]">
+            <button type="button" className={tabClass(mode === 'owner')} onClick={() => setMode('owner')}>
+              <Store size={16} /> Create a shop
+            </button>
+            <button type="button" className={tabClass(mode === 'employee')} onClick={() => setMode('employee')}>
+              <Users size={16} /> Join a shop
+            </button>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-[18px]">
+            <div>
+              <label className="block text-body-strong text-ink mb-[8px]">Full Name</label>
+              <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)}
+                className="text-input" placeholder="e.g. Nakato Sarah" required />
+            </div>
+
             <div>
               <label className="block text-body-strong text-ink mb-[8px]">Email</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 className="text-input" placeholder="you@example.com" required />
             </div>
 
-            <div>
-              <label className="block text-body-strong text-ink mb-[8px]">Shop Name</label>
-              <input type="text" value={shopName} onChange={(e) => setShopName(e.target.value)}
-                className="text-input" placeholder="e.g. Nakawa General Store" required />
-            </div>
-
-            <div>
-              <label className="block text-body-strong text-ink mb-[8px]">Role</label>
-              <div className="relative">
-                <select value={role} onChange={(e) => setRole(e.target.value)}
-                  className="text-input appearance-none cursor-pointer pr-[40px] bg-canvas-light">
-                  <option value="admin">Shop Owner</option>
-                  <option value="employee">Employee</option>
-                </select>
-                <ChevronDown size={16} className="absolute right-[12px] top-1/2 -translate-y-1/2 text-shade-60 pointer-events-none" />
+            {mode === 'owner' ? (
+              <div>
+                <label className="block text-body-strong text-ink mb-[8px]">Shop Name</label>
+                <input type="text" value={shopName} onChange={(e) => setShopName(e.target.value)}
+                  className="text-input" placeholder="e.g. Nakawa General Store" required />
               </div>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-body-strong text-ink mb-[8px]">Invite Code</label>
+                <input type="text" value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                  className="text-input uppercase tracking-widest" placeholder="SHOP-XXXX" required />
+                {inviteShopName && (
+                  <p className="flex items-center gap-[6px] text-caption text-ink mt-[8px]">
+                    <CheckCircle2 size={14} className="text-[#15803d]" />
+                    You're joining <span className="font-medium">{inviteShopName}</span>
+                  </p>
+                )}
+                {!inviteShopName && inviteCode.trim().length >= 9 && (
+                  <p className="text-caption text-[#991b1b] mt-[8px]">No shop found for this code.</p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block text-body-strong text-ink mb-[8px]">Password</label>
@@ -137,7 +199,7 @@ export const Signup = () => {
             )}
 
             <button type="submit" disabled={loading} className="btn-primary-pill w-full mt-[8px]">
-              {loading ? 'Creating account…' : 'Create account'}
+              {loading ? 'Creating account…' : mode === 'owner' ? 'Create shop & account' : 'Join shop'}
             </button>
           </form>
 

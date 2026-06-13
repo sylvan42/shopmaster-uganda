@@ -126,3 +126,21 @@
     @apply flex flex-col items-center justify-center py-[64px] text-center;
   }
 }
+
+/* Receipt printing: hide everything except the receipt content */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 16px;
+  }
+}

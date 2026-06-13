@@ -1,133 +1,205 @@
-import { useState } from 'react'
-import { ShoppingCart, Search, Download, Eye, ChevronDown } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ShoppingCart, Search, Plus, Eye, Download, ChevronDown } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
-import { EmptyState } from '../components/EmptyState'
 import { StatTile } from '../components/StatTile'
-import { formatUGX, formatUGXShort, formatDate, formatTime } from '../lib/formatters'
+import { EmptyState } from '../components/EmptyState'
+import { ErrorState } from '../components/ErrorState'
+import { DateRangePicker } from '../components/DateRangePicker'
+import { PosModal } from '../components/pos/PosModal'
+import { ReceiptModal } from '../components/ReceiptModal'
 import { useAuth } from '../context/AuthContext'
-
-const PAYMENT_BADGES = {
-  Cash: 'badge-green',
-  'MTN Mobile': 'badge-yellow',
-  'Airtel Money': 'badge-yellow',
-  Credit: 'badge-red',
-}
-
-const TODAY = new Date()
-const addHours = (h) => {
-  const d = new Date(TODAY)
-  d.setHours(h, Math.floor(Math.random() * 59))
-  return d
-}
-
-const SALES = [
-  { id: 'R-00118', time: addHours(9), items: 'Sugar 1kg × 3, Salt 500g × 2', payment: 'Cash', amount: 14000, cashier: 'Ssemakula James', status: 'completed' },
-  { id: 'R-00117', time: addHours(9), items: 'Cooking Oil 1L', payment: 'MTN Mobile', amount: 9800, cashier: 'Akello Grace', status: 'completed' },
-  { id: 'R-00116', time: addHours(8), items: 'Posho Flour 2kg × 2, Beans 1kg', payment: 'Airtel Money', amount: 17500, cashier: 'Ssemakula James', status: 'completed' },
-  { id: 'R-00115', time: addHours(8), items: 'Blue Band 500g', payment: 'Cash', amount: 9500, cashier: 'Namutebi Fatuma', status: 'completed' },
-  { id: 'R-00114', time: addHours(8), items: 'Rice 1kg × 4', payment: 'MTN Mobile', amount: 22000, cashier: 'Akello Grace', status: 'completed' },
-  { id: 'R-00113', time: addHours(7), items: 'Bread Loaf × 2, Blue Band 500g', payment: 'Cash', amount: 19500, cashier: 'Ssemakula James', status: 'completed' },
-  { id: 'R-00112', time: addHours(7), items: 'Sugar 2kg', payment: 'Cash', amount: 8000, cashier: 'Namutebi Fatuma', status: 'completed' },
-  { id: 'R-00111', time: addHours(6), items: 'Spaghetti 400g × 3, Royco Cubes', payment: 'Credit', amount: 11400, cashier: 'Akello Grace', status: 'completed' },
-  { id: 'R-00110', time: addHours(6), items: 'Groundnut Oil 500ml', payment: 'MTN Mobile', amount: 7500, cashier: 'Ssemakula James', status: 'completed' },
-  { id: 'R-00109', time: addHours(6), items: 'Salt 500g × 5, Beans 1kg × 2', payment: 'Cash', amount: 15000, cashier: 'Namutebi Fatuma', status: 'completed' },
-]
-
-const totalSales = SALES.reduce((s, t) => s + t.amount, 0)
+import { useDateRange } from '../hooks/useDateRange'
+import { useSupabaseQuery } from '../hooks/useSupabaseQuery'
+import { salesService, PAYMENT_METHODS, paymentLabel } from '../services/salesService'
+import { formatUGX, formatDate, formatTime } from '../lib/formatters'
+import { downloadCsv } from '../utils/csv'
 
 export const Sales = () => {
   const { userRole } = useAuth()
-  const isAdmin = userRole === 'admin'
+  const isOwner = userRole === 'owner'
+  const range = useDateRange('today')
   const [search, setSearch] = useState('')
-  const [paymentFilter, setPaymentFilter] = useState('All')
+  const [paymentFilter, setPaymentFilter] = useState('')
+  const [posOpen, setPosOpen] = useState(false)
+  const [receipt, setReceipt] = useState(null)
 
-  const filtered = SALES.filter(s => {
-    const matchSearch = s.id.toLowerCase().includes(search.toLowerCase()) || s.items.toLowerCase().includes(search.toLowerCase())
-    const matchPayment = paymentFilter === 'All' || s.payment === paymentFilter
-    return matchSearch && matchPayment
-  })
+  const { data: sales, loading, error, refetch } = useSupabaseQuery(
+    () => salesService.list({ from: range.from, to: range.to, paymentMethod: paymentFilter }),
+    [range.from.getTime(), range.to.getTime(), paymentFilter]
+  )
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    if (!q) return sales || []
+    return (sales || []).filter(
+      (s) =>
+        s.receipt_no.toLowerCase().includes(q) ||
+        (s.seller?.full_name || '').toLowerCase().includes(q) ||
+        (s.customer_name || '').toLowerCase().includes(q) ||
+        s.sale_items.some((i) => i.product_name.toLowerCase().includes(q))
+    )
+  }, [sales, search])
+
+  const totals = useMemo(() => ({
+    revenue: filtered.reduce((sum, s) => sum + Number(s.total_amount), 0),
+    count: filtered.length,
+    items: filtered.reduce((sum, s) => sum + s.sale_items.reduce((n, i) => n + i.quantity, 0), 0),
+  }), [filtered])
+
+  const handleExport = () => {
+    const rows = filtered.flatMap((s) =>
+      s.sale_items.map((i) => ({
+        receipt: s.receipt_no,
+        date: formatDate(s.created_at),
+        time: formatTime(s.created_at),
+        seller: s.seller?.full_name || s.seller?.email || '',
+        product: i.product_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        line_total: i.line_total,
+        payment: paymentLabel(s.payment_method),
+        customer: s.customer_name || '',
+      }))
+    )
+    downloadCsv(`sales-${range.label.toLowerCase().replace(/\s+/g, '-')}`, rows, [
+      { key: 'receipt', label: 'Receipt' },
+      { key: 'date', label: 'Date' },
+      { key: 'time', label: 'Time' },
+      { key: 'seller', label: 'Sold By' },
+      { key: 'product', label: 'Product' },
+      { key: 'quantity', label: 'Qty' },
+      { key: 'unit_price', label: 'Unit Price (UGX)' },
+      { key: 'line_total', label: 'Line Total (UGX)' },
+      { key: 'payment', label: 'Payment' },
+      { key: 'customer', label: 'Customer' },
+    ])
+  }
+
+  const itemsSummary = (s) =>
+    s.sale_items.map((i) => `${i.product_name} × ${i.quantity}`).join(', ')
+
+  if (error) return <ErrorState message={error.message} onRetry={refetch} />
 
   return (
     <div className="space-y-[24px]">
       <PageHeader
         title="Sales"
-        subtitle={`${SALES.length} transactions today`}
-        action={isAdmin
-          ? <button className="btn-outline-on-light flex items-center gap-[8px]"><Download size={16} /> Export CSV</button>
-          : <button className="btn-primary-pill flex items-center gap-[8px]"><ShoppingCart size={16} /> Record Sale</button>
+        subtitle={isOwner ? 'All sales recorded in your shop' : 'Sales you have recorded'}
+        action={
+          <div className="flex gap-[8px]">
+            {isOwner && (
+              <button className="btn-outline-on-light flex items-center gap-[8px]" onClick={handleExport}
+                disabled={!filtered.length}>
+                <Download size={16} /> Export
+              </button>
+            )}
+            <button className="btn-primary-pill flex items-center gap-[8px]" onClick={() => setPosOpen(true)}>
+              <Plus size={16} /> Record Sale
+            </button>
+          </div>
         }
       />
 
-      {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-[12px]">
-        <StatTile label="Total Sales Today" value={formatUGXShort(totalSales)} />
-        <StatTile label="Transactions" value={SALES.length.toString()} subValue="all completed" />
-        <StatTile label="Average Transaction" value={formatUGXShort(Math.round(totalSales / SALES.length))} />
+      {/* Period + totals */}
+      <div className="card-standard space-y-[16px]">
+        <DateRangePicker range={range} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-[12px]">
+          <StatTile label={`Revenue (${range.label})`} value={formatUGX(totals.revenue)} />
+          <StatTile label="Transactions" value={totals.count} />
+          <StatTile label="Items Sold" value={totals.items} />
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="card-standard py-[14px]">
+      <div className="card-standard">
         <div className="flex flex-col sm:flex-row gap-[12px] items-start sm:items-center">
-          <div className="relative flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0 w-full">
             <Search size={16} className="absolute left-[12px] top-1/2 -translate-y-1/2 text-shade-60" />
-            <input className="search-input" placeholder="Search by receipt # or product…"
+            <input className="search-input" placeholder="Search receipt, product, customer…"
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="relative">
             <select className="text-input pr-[32px] appearance-none cursor-pointer text-caption py-[9px]"
               value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
-              {['All', 'Cash', 'MTN Mobile', 'Airtel Money', 'Credit'].map(p => <option key={p}>{p}</option>)}
+              <option value="">All payments</option>
+              {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
             <ChevronDown size={14} className="absolute right-[10px] top-1/2 -translate-y-1/2 text-shade-60 pointer-events-none" />
           </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="table-container">
-        <div className="overflow-x-auto">
-          <table className="table-base">
-            <thead>
-              <tr>
-                <th className="th-cell">Time</th>
-                <th className="th-cell">Receipt #</th>
-                <th className="th-cell">Items</th>
-                <th className="th-cell">Payment</th>
-                <th className="th-cell">Amount</th>
-                {isAdmin && <th className="th-cell">Cashier</th>}
-                <th className="th-cell">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
+      {loading ? (
+        <div className="card-standard flex justify-center py-[64px]"><div className="spinner" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="card-standard">
+          <EmptyState icon={ShoppingCart} title="No sales in this period"
+            subtitle="Record your first sale to see it here."
+            action={
+              <button className="btn-primary-pill flex items-center gap-[8px]" onClick={() => setPosOpen(true)}>
+                <Plus size={16} /> Record Sale
+              </button>
+            } />
+        </div>
+      ) : (
+        <div className="table-container">
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="py-0 border-0">
-                    <EmptyState icon={ShoppingCart} title="No transactions found" subtitle="Try adjusting your search or filters." />
-                  </td>
+                  <th className="th-cell">Receipt</th>
+                  <th className="th-cell">Date & Time</th>
+                  <th className="th-cell">Items</th>
+                  {isOwner && <th className="th-cell">Sold By</th>}
+                  <th className="th-cell">Payment</th>
+                  <th className="th-cell">Amount</th>
+                  <th className="th-cell">View</th>
                 </tr>
-              ) : (
-                filtered.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-canvas-cream transition-colors">
-                    <td className="td-cell text-caption text-shade-60">{formatTime(sale.time)}</td>
-                    <td className="td-cell font-mono text-caption font-medium text-ink">{sale.id}</td>
-                    <td className="td-cell max-w-[200px]">
-                      <span className="block truncate text-body-md" title={sale.items}>{sale.items}</span>
+              </thead>
+              <tbody>
+                {filtered.map((s) => (
+                  <tr key={s.id} className="hover:bg-canvas-cream transition-colors">
+                    <td className="td-cell font-medium text-ink">{s.receipt_no}</td>
+                    <td className="td-cell text-shade-60">
+                      {formatDate(s.created_at)} <span className="text-shade-40">·</span> {formatTime(s.created_at)}
                     </td>
-                    <td className="td-cell">
-                      <span className={PAYMENT_BADGES[sale.payment] || 'pill-tag-shade'}>{sale.payment}</span>
+                    <td className="td-cell max-w-[280px]">
+                      <span className="block truncate" title={itemsSummary(s)}>{itemsSummary(s)}</span>
                     </td>
-                    <td className="td-cell font-medium text-ink">{formatUGX(sale.amount)}</td>
-                    {isAdmin && <td className="td-cell text-body-md text-shade-60">{sale.cashier}</td>}
+                    {isOwner && (
+                      <td className="td-cell text-shade-60">{s.seller?.full_name || s.seller?.email || '—'}</td>
+                    )}
                     <td className="td-cell">
-                      <button className="btn-ghost" title="View Receipt"><Eye size={15} /></button>
+                      <span className={s.payment_method === 'credit' ? 'badge-yellow' : 'pill-tag-shade'}>
+                        {paymentLabel(s.payment_method)}
+                      </span>
+                    </td>
+                    <td className="td-cell font-medium text-ink">{formatUGX(s.total_amount)}</td>
+                    <td className="td-cell">
+                      <button className="btn-ghost" title="View receipt" onClick={() => setReceipt(s)}>
+                        <Eye size={15} />
+                      </button>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      <PosModal
+        open={posOpen}
+        onClose={() => setPosOpen(false)}
+        onComplete={async (result) => {
+          setPosOpen(false)
+          refetch()
+          const { data } = await salesService.getReceipt(result.sale_id)
+          if (data) setReceipt(data)
+        }}
+      />
+
+      <ReceiptModal open={Boolean(receipt)} onClose={() => setReceipt(null)} sale={receipt} />
     </div>
   )
 }
