@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { ToastProvider } from './context/ToastContext'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoadingScreen } from './components/LoadingScreen'
@@ -35,9 +36,9 @@ function AppRoutes() {
       <Route path="/products" element={protectedPage(<Products />)} />
       <Route path="/sales" element={protectedPage(<Sales />)} />
       <Route path="/inventory" element={protectedPage(<Inventory />)} />
-      <Route path="/reports" element={protectedPage(<Reports />, 'admin')} />
-      <Route path="/employees" element={protectedPage(<Employees />, 'admin')} />
-      <Route path="/expenses" element={protectedPage(<Expenses />)} />
+      <Route path="/reports" element={protectedPage(<Reports />, 'owner')} />
+      <Route path="/employees" element={protectedPage(<Employees />, 'owner')} />
+      <Route path="/expenses" element={protectedPage(<Expenses />, 'owner')} />
       <Route path="/settings" element={protectedPage(<Settings />)} />
 
       <Route path="/unauthorized" element={
@@ -60,7 +61,9 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <AppRoutes />
+        <ToastProvider>
+          <AppRoutes />
+        </ToastProvider>
       </AuthProvider>
     </Router>
   )

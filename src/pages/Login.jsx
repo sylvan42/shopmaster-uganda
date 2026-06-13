@@ -114,11 +114,6 @@ export const Login = () => {
             </Link>
           </p>
 
-          <div className="mt-[32px] p-[16px] bg-canvas-cream border border-hairline-light rounded-lg">
-            <p className="text-caption text-shade-60 mb-[6px] uppercase tracking-wider font-medium">Demo credentials</p>
-            <p className="text-caption text-ink">Admin: admin@shopmaster.com / password123</p>
-            <p className="text-caption text-ink">Employee: employee@shopmaster.com / password123</p>
-          </div>
         </div>
       </div>
     </div>

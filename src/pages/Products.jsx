@@ -1,71 +1,155 @@
-import { useState } from 'react'
-import { Package, Search, Plus, Edit2, Trash2, LayoutGrid, List, ChevronDown } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { differenceInDays } from 'date-fns'
+import { Package, Search, Plus, Edit2, Trash2, LayoutGrid, List, ChevronDown, Download } from 'lucide-react'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
-import { formatUGX } from '../lib/formatters'
+import { ErrorState } from '../components/ErrorState'
+import { ProductFormModal } from '../components/forms/ProductFormModal'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
+import { useSupabaseQuery } from '../hooks/useSupabaseQuery'
+import { productsService } from '../services/productsService'
+import { inventoryService } from '../services/inventoryService'
+import { formatUGX, formatDate } from '../lib/formatters'
+import { downloadCsv } from '../utils/csv'
 
-const PRODUCTS = [
-  { id: 1, name: 'Sugar 1kg', category: 'Dry Goods', price: 4200, cost: 3200, stock: 24, unit: 'bag' },
-  { id: 2, name: 'Sugar 2kg', category: 'Dry Goods', price: 8000, cost: 6200, stock: 15, unit: 'bag' },
-  { id: 3, name: 'Posho Flour 2kg', category: 'Dry Goods', price: 6500, cost: 4800, stock: 8, unit: 'packet' },
-  { id: 4, name: 'Rice 1kg', category: 'Dry Goods', price: 5500, cost: 4000, stock: 0, unit: 'packet' },
-  { id: 5, name: 'Cooking Oil 1L', category: 'Cooking', price: 9800, cost: 7500, stock: 32, unit: 'bottle' },
-  { id: 6, name: 'Groundnut Oil 500ml', category: 'Cooking', price: 7500, cost: 5800, stock: 6, unit: 'bottle' },
-  { id: 7, name: 'Salt 500g', category: 'Spices', price: 1200, cost: 800, stock: 45, unit: 'packet' },
-  { id: 8, name: 'Beans 1kg', category: 'Dry Goods', price: 4500, cost: 3200, stock: 18, unit: 'packet' },
-  { id: 9, name: 'Spaghetti 400g', category: 'Pasta', price: 3200, cost: 2400, stock: 22, unit: 'packet' },
-  { id: 10, name: 'Bread Loaf', category: 'Bakery', price: 5000, cost: 3800, stock: 4, unit: 'loaf' },
-  { id: 11, name: 'Blue Band 500g', category: 'Spreads', price: 9500, cost: 7200, stock: 11, unit: 'tub' },
-  { id: 12, name: 'Royco Cubes (10pk)', category: 'Spices', price: 1800, cost: 1200, stock: 0, unit: 'pack' },
-]
-
-const CATEGORIES = ['All', ...Array.from(new Set(PRODUCTS.map(p => p.category)))]
-
-const getStatus = (stock) => {
-  if (stock === 0) return { label: 'Out of Stock', cls: 'badge-red' }
-  if (stock <= 8) return { label: 'Low Stock', cls: 'badge-yellow' }
+const getStatus = (p) => {
+  if (p.quantity === 0) return { label: 'Out of Stock', cls: 'badge-red' }
+  if (p.quantity <= p.reorder_level) return { label: 'Low Stock', cls: 'badge-yellow' }
   return { label: 'In Stock', cls: 'badge-green' }
 }
 
+const isExpiringSoon = (p) =>
+  p.expiry_date && differenceInDays(new Date(p.expiry_date), new Date()) <= 30
+
 export const Products = () => {
+  const { shopId, userRole } = useAuth()
+  const toast = useToast()
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [view, setView] = useState('table')
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [saving, setSaving] = useState(false)
 
-  const filtered = PRODUCTS.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
-    const matchCat = category === 'All' || p.category === category
-    const status = getStatus(p.stock)
-    const matchStatus = statusFilter === 'All' || status.label === statusFilter
-    return matchSearch && matchCat && matchStatus
-  })
+  const { data: products, loading, error, refetch } = useSupabaseQuery(
+    () => productsService.list(),
+    []
+  )
+
+  const categories = useMemo(
+    () => [...new Set((products || []).map((p) => p.category).filter(Boolean))].sort(),
+    [products]
+  )
+
+  const filtered = useMemo(() => {
+    return (products || []).filter((p) => {
+      const q = search.toLowerCase()
+      const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q)
+      const matchCat = category === 'All' || p.category === category
+      const matchStatus = statusFilter === 'All' || getStatus(p).label === statusFilter
+      return matchSearch && matchCat && matchStatus
+    })
+  }, [products, search, category, statusFilter])
+
+  const handleSave = async (values) => {
+    setSaving(true)
+    const { initial_quantity, ...productValues } = values
+    if (editing) {
+      const { error } = await productsService.update(editing.id, productValues)
+      if (error) {
+        toast.error(error.message)
+      } else {
+        toast.success(`${productValues.name} updated`)
+        setFormOpen(false)
+        setEditing(null)
+        refetch()
+      }
+    } else {
+      // Insert with zero stock, then record initial stock through the ledger RPC
+      const { data: created, error } = await productsService.create(shopId, { ...productValues, quantity: 0 })
+      if (error) {
+        toast.error(error.message?.includes('duplicate') ? 'A product with this SKU already exists.' : error.message)
+      } else {
+        if (initial_quantity > 0) {
+          const { error: stockError } = await inventoryService.restock(
+            created.id, initial_quantity, productValues.buying_price, 'Initial stock'
+          )
+          if (stockError) toast.error(`Product added but initial stock failed: ${stockError.message}`)
+        }
+        toast.success(`${productValues.name} added`)
+        setFormOpen(false)
+        refetch()
+      }
+    }
+    setSaving(false)
+  }
+
+  const handleDeactivate = async () => {
+    setSaving(true)
+    const { error } = await productsService.deactivate(deleting.id)
+    if (error) {
+      toast.error(error.message)
+    } else {
+      toast.success(`${deleting.name} removed from catalogue`)
+      setDeleting(null)
+      refetch()
+    }
+    setSaving(false)
+  }
+
+  const handleExport = () => {
+    downloadCsv('products', filtered, [
+      { key: 'name', label: 'Product' },
+      { key: 'category', label: 'Category' },
+      { key: 'sku', label: 'SKU' },
+      { key: 'buying_price', label: 'Buying Price (UGX)' },
+      { key: 'selling_price', label: 'Selling Price (UGX)' },
+      { key: 'quantity', label: 'Stock' },
+      { key: 'reorder_level', label: 'Reorder Level' },
+      { key: 'supplier', label: 'Supplier' },
+      { key: 'expiry_date', label: 'Expiry Date' },
+    ])
+  }
+
+  if (error) return <ErrorState message={error.message} onRetry={refetch} />
 
   return (
     <div className="space-y-[24px]">
       <PageHeader
         title="Products"
-        subtitle={`${PRODUCTS.length} products in catalogue`}
+        subtitle={loading ? 'Loading…' : `${(products || []).length} products in catalogue`}
         action={
-          <button className="btn-primary-pill flex items-center gap-[8px]">
-            <Plus size={16} /> Add Product
-          </button>
+          <div className="flex gap-[8px]">
+            {userRole === 'owner' && (
+              <button className="btn-outline-on-light flex items-center gap-[8px]" onClick={handleExport}>
+                <Download size={16} /> Export
+              </button>
+            )}
+            <button className="btn-primary-pill flex items-center gap-[8px]"
+              onClick={() => { setEditing(null); setFormOpen(true) }}>
+              <Plus size={16} /> Add Product
+            </button>
+          </div>
         }
       />
 
       {/* Filters */}
       <div className="card-standard">
         <div className="flex flex-col sm:flex-row gap-[12px] items-start sm:items-center">
-          <div className="relative flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0 w-full">
             <Search size={16} className="absolute left-[12px] top-1/2 -translate-y-1/2 text-shade-60" />
-            <input className="search-input" placeholder="Search products…"
+            <input className="search-input" placeholder="Search by name or SKU…"
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="flex gap-[8px] flex-wrap">
             <div className="relative">
               <select className="text-input pr-[32px] appearance-none cursor-pointer text-caption py-[9px]"
                 value={category} onChange={(e) => setCategory(e.target.value)}>
-                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                {['All', ...categories].map(c => <option key={c}>{c}</option>)}
               </select>
               <ChevronDown size={14} className="absolute right-[10px] top-1/2 -translate-y-1/2 text-shade-60 pointer-events-none" />
             </div>
@@ -88,11 +172,19 @@ export const Products = () => {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="card-standard flex justify-center py-[64px]"><div className="spinner" /></div>
+      ) : filtered.length === 0 ? (
         <div className="card-standard">
-          <EmptyState icon={Package} title="No products found"
-            subtitle="Try adjusting your search or filters."
-            action={<button className="btn-primary-pill flex items-center gap-[8px]"><Plus size={16} /> Add Product</button>} />
+          <EmptyState icon={Package}
+            title={(products || []).length === 0 ? 'No products yet' : 'No products found'}
+            subtitle={(products || []).length === 0 ? 'Add your first product to start tracking stock and sales.' : 'Try adjusting your search or filters.'}
+            action={
+              <button className="btn-primary-pill flex items-center gap-[8px]"
+                onClick={() => { setEditing(null); setFormOpen(true) }}>
+                <Plus size={16} /> Add Product
+              </button>
+            } />
         </div>
       ) : view === 'table' ? (
         <div className="table-container">
@@ -111,19 +203,37 @@ export const Products = () => {
               </thead>
               <tbody>
                 {filtered.map((p) => {
-                  const { label, cls } = getStatus(p.stock)
+                  const { label, cls } = getStatus(p)
                   return (
                     <tr key={p.id} className="hover:bg-canvas-cream transition-colors">
-                      <td className="td-cell font-medium text-ink">{p.name}</td>
-                      <td className="td-cell"><span className="pill-tag-shade">{p.category}</span></td>
-                      <td className="td-cell text-body-md">{formatUGX(p.price)}</td>
-                      <td className="td-cell text-body-md text-shade-60">{formatUGX(p.cost)}</td>
-                      <td className="td-cell text-body-md">{p.stock} {p.unit}{p.stock !== 1 ? 's' : ''}</td>
-                      <td className="td-cell"><span className={cls}>{label}</span></td>
+                      <td className="td-cell">
+                        <span className="font-medium text-ink">{p.name}</span>
+                        {p.sku && <span className="block text-caption text-shade-60">{p.sku}</span>}
+                      </td>
+                      <td className="td-cell">{p.category ? <span className="pill-tag-shade">{p.category}</span> : <span className="text-shade-40">—</span>}</td>
+                      <td className="td-cell text-body-md">{formatUGX(p.selling_price)}</td>
+                      <td className="td-cell text-body-md text-shade-60">{formatUGX(p.buying_price)}</td>
+                      <td className="td-cell text-body-md">{p.quantity}</td>
+                      <td className="td-cell">
+                        <div className="flex flex-wrap gap-[4px]">
+                          <span className={cls}>{label}</span>
+                          {isExpiringSoon(p) && (
+                            <span className="badge-yellow" title={`Expires ${formatDate(p.expiry_date)}`}>Expiring</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="td-cell">
                         <div className="flex items-center gap-[4px]">
-                          <button className="btn-ghost" title="Edit"><Edit2 size={15} /></button>
-                          <button className="btn-ghost text-[#991b1b] hover:bg-[#fee2e2]" title="Delete"><Trash2 size={15} /></button>
+                          <button className="btn-ghost" title="Edit"
+                            onClick={() => { setEditing(p); setFormOpen(true) }}>
+                            <Edit2 size={15} />
+                          </button>
+                          {userRole === 'owner' && (
+                            <button className="btn-ghost text-[#991b1b] hover:bg-[#fee2e2]" title="Remove"
+                              onClick={() => setDeleting(p)}>
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -136,21 +246,42 @@ export const Products = () => {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-[16px]">
           {filtered.map((p) => {
-            const { label, cls } = getStatus(p.stock)
+            const { label, cls } = getStatus(p)
             return (
-              <div key={p.id} className="card-standard hover:shadow-elevation-4 transition-shadow cursor-pointer">
-                <p className="text-eyebrow-cap uppercase text-shade-60 mb-[6px]">{p.category}</p>
+              <div key={p.id} className="card-standard hover:shadow-elevation-4 transition-shadow cursor-pointer"
+                onClick={() => { setEditing(p); setFormOpen(true) }}>
+                <p className="text-eyebrow-cap uppercase text-shade-60 mb-[6px]">{p.category || 'Uncategorised'}</p>
                 <h3 className="text-body-strong text-ink mb-[8px] leading-snug">{p.name}</h3>
-                <p className="text-heading-sm font-medium text-ink mb-[8px]">{formatUGX(p.price)}</p>
+                <p className="text-heading-sm font-medium text-ink mb-[8px]">{formatUGX(p.selling_price)}</p>
                 <div className="flex items-center justify-between">
                   <span className={cls}>{label}</span>
-                  <span className="text-caption text-shade-60">{p.stock} left</span>
+                  <span className="text-caption text-shade-60">{p.quantity} left</span>
                 </div>
               </div>
             )
           })}
         </div>
       )}
+
+      <ProductFormModal
+        open={formOpen}
+        onClose={() => { setFormOpen(false); setEditing(null) }}
+        onSave={handleSave}
+        product={editing}
+        categories={categories}
+        saving={saving}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onClose={() => setDeleting(null)}
+        onConfirm={handleDeactivate}
+        title="Remove product"
+        message={`Remove "${deleting?.name}" from the catalogue? Its sales history and stock records are kept, but it can no longer be sold.`}
+        confirmLabel="Remove"
+        danger
+        loading={saving}
+      />
     </div>
   )
 }
